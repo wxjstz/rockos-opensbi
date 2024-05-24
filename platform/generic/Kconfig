@@ -58,7 +58,7 @@ config PLATFORM_SOPHGO_SG2042
 	default n
 
 config PLATFORM_ESWIN_EIC770X
-	bool "ESWIN EIC770X support"
+	bool "eswin eic770x support"
 	default n
 
 config PLATFORM_STARFIVE_JH7110
@@ -73,5 +73,6 @@ config PLATFORM_THEAD
 
 source "$(OPENSBI_SRC_DIR)/platform/generic/andes/Kconfig"
 source "$(OPENSBI_SRC_DIR)/platform/generic/thead/Kconfig"
+source "$(OPENSBI_SRC_DIR)/platform/generic/eswin/eic770x/Kconfig"
 
 endif

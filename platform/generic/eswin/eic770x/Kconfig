@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+if PLATFORM_ESWIN_EIC770X
+
+
+choice
+	prompt "select eic770x chip"
+	default PLATFORM_ESWIN_EIC7700
+config PLATFORM_ESWIN_EIC7700
+	bool "eic7700"
+config PLATFORM_ESWIN_EIC7702
+	bool "eic7702"
+endchoice
+
+
+if PLATFORM_ESWIN_EIC7700
+config PLATFORM_SPECAL_ADDR
+	bool
+	default y
+config FW_TEXT_START
+	hex
+	default 0x80000000
+config FW_JUMP_ADDR
+	hex
+	default 0xf8000000
+config FW_JUMP_FDT_ADDR
+	hex
+	default 0xf8000000
+config FW_PAYLOAD_OFFSET
+	hex
+	default 0x200000
+config FW_PAYLOAD_FDT_ADDR
+	hex
+	default 0xf8000000
+endif
+
+
+endif
