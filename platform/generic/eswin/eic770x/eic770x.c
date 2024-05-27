@@ -2,6 +2,11 @@
 #include <sbi_utils/fdt/fdt_helper.h>
 #include <sbi/riscv_io.h>
 
+#ifdef CONFIG_PLATFORM_ESWIN_EIC7700
+#define BR2_CHIPLET_1
+#define BR2_CHIPLET_1_DIE0_AVAILABLE
+#endif
+
 /* Full tlb flush always */
 #define EIC770X_TLB_RANGE_FLUSH_LIMIT	0
 
