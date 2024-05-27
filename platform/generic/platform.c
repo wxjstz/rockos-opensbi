@@ -261,6 +261,13 @@ static int generic_final_init(bool cold_boot)
 	return 0;
 }
 
+static int generic_resume_finish(struct sbi_scratch * scratch)
+{
+	if (generic_plat && generic_plat->resume_finish)
+		return generic_plat->resume_finish(scratch);
+	return 0;
+}
+
 static bool generic_vendor_ext_check(void)
 {
 	return (generic_plat && generic_plat->vendor_ext_provider) ?
@@ -395,6 +402,7 @@ const struct sbi_platform_operations platform_ops = {
 	.final_init		= generic_final_init,
 	.early_exit		= generic_early_exit,
 	.final_exit		= generic_final_exit,
+	.resume_finish		= generic_resume_finish,
 	.extensions_init	= generic_extensions_init,
 	.domains_init		= generic_domains_init,
 	.console_init		= generic_console_init,

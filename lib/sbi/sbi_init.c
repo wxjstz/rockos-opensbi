@@ -456,6 +456,7 @@ static void __noreturn init_warm_resume(struct sbi_scratch *scratch,
 					u32 hartid)
 {
 	int rc;
+	const struct sbi_platform *plat = sbi_platform_ptr(scratch);
 
 	sbi_hsm_hart_resume_start(scratch);
 
@@ -466,6 +467,8 @@ static void __noreturn init_warm_resume(struct sbi_scratch *scratch,
 	rc = sbi_hart_pmp_configure(scratch);
 	if (rc)
 		sbi_hart_hang();
+
+	sbi_platform_resume_finish(plat, scratch);
 
 	sbi_hsm_hart_resume_finish(scratch, hartid);
 }

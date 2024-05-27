@@ -82,6 +82,9 @@ struct sbi_platform_operations {
 	/** Platform final initialization */
 	int (*final_init)(bool cold_boot);
 
+	/** Platform resume finish */
+	int (*resume_finish)(struct sbi_scratch *scratch);
+
 	/** Platform early exit */
 	void (*early_exit)(void);
 	/** Platform final exit */
@@ -431,6 +434,14 @@ static inline int sbi_platform_final_init(const struct sbi_platform *plat,
 {
 	if (plat && sbi_platform_ops(plat)->final_init)
 		return sbi_platform_ops(plat)->final_init(cold_boot);
+	return 0;
+}
+
+static inline int sbi_platform_resume_finish(const struct sbi_platform *plat,
+					struct sbi_scratch *scratch)
+{
+	if (plat && sbi_platform_ops(plat)->resume_finish)
+		return sbi_platform_ops(plat)->resume_finish(scratch);
 	return 0;
 }
 
