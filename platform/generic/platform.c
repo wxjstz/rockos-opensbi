@@ -216,6 +216,8 @@ static int generic_nascent_init(void)
 {
 	if (platform_has_mlevel_imsic)
 		imsic_local_irqchip_init();
+	if (generic_plat && generic_plat->nascent_init)
+		return generic_plat->nascent_init();
 	return 0;
 }
 

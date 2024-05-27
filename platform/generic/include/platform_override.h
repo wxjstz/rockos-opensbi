@@ -17,6 +17,7 @@
 
 struct platform_override {
 	const struct fdt_match *match_table;
+	int (*nascent_init)(void);
 	u64 (*features)(const struct fdt_match *match);
 	u64 (*tlbr_flush_limit)(const struct fdt_match *match);
 	u32 (*tlb_num_entries)(const struct fdt_match *match);
