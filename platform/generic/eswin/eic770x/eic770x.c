@@ -43,6 +43,72 @@ static int eic770x_nascent_init(void)
 	return 0;
 }
 
+
+static void init_fcsr(void)
+{
+	unsigned long hwpf;	// Hardware Prefetcher 0 : 0x104095C1BE241 | Hardware Prefetcher 1 : 0x38c84e
+
+	hwpf = 0x104095C1BE241UL;
+	__asm__ volatile("csrw 0x7c3 , %0" : : "r"(hwpf));
+	hwpf = 0x38c84eUL;
+	__asm__ volatile("csrw 0x7c4 , %0" : : "r"(hwpf));
+
+	/* enable speculative icache refill */
+	__asm__ volatile("csrw 0x7c1 , x0" : :);
+	__asm__ volatile("csrw 0x7c2 , x0" : :);
+
+}
+
+#ifndef BR2_CHIPLET_2
+static void init_bus_blocker(void)
+{
+#if (defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE0_AVAILABLE)
+	#define BLOCKER_TL64D2D_OUT	(void *)0x200000
+	#define BLOCKER_TL256D2D_OUT	(void *)0x202000
+	#define BLOCKER_TL256D2D_IN	(void *)0x204000
+	writel(1,BLOCKER_TL64D2D_OUT);
+	writel(1,BLOCKER_TL256D2D_OUT);
+	writel(1,BLOCKER_TL256D2D_IN);
+#elif (defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE1_AVAILABLE)
+	#define BLOCKER_TL64D2D_OUT	(void *)(0x200000+0x20000000)
+	#define BLOCKER_TL256D2D_OUT	(void *)(0x202000+0x20000000)
+	#define BLOCKER_TL256D2D_IN	(void *)(0x204000+0x20000000)
+	writel(1,BLOCKER_TL64D2D_OUT);
+	writel(1,BLOCKER_TL256D2D_OUT);
+	writel(1,BLOCKER_TL256D2D_IN);
+#endif
+}
+#endif
+
+static void sbi_hart_blocker_fscr_configure(struct sbi_scratch *scratch)
+{
+	struct sbi_domain *dom = sbi_domain_thishart_ptr();
+
+	if (dom->boot_hartid == current_hartid()) {
+		#ifndef BR2_CHIPLET_2
+		/* if only one die, need config blocker to
+		generate fake response when access remote target */
+		init_bus_blocker();
+		#endif
+	}
+
+	init_fcsr();
+}
+
+static int eic770x_final_init(int clod_boot, const struct fdt_match *match)
+{
+	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+	sbi_hart_blocker_fscr_configure(scratch);
+	return 0;
+}
+
+
+static int eic770x_resume_finish(struct sbi_scratch *scratch)
+{
+	sbi_hart_blocker_fscr_configure(scratch);
+	return 0;
+}
+
 static const struct fdt_match eic770x_match[] = {
 	{ .compatible = "SiFive,FU800-dev" },
 	{ .compatible = "fu800-dev" },
@@ -55,4 +121,6 @@ const struct platform_override eic770x = {
 	.tlbr_flush_limit	= eic770x_get_tlbr_flush_limit,
 	.fw_init		= eic770x_fw_init,
 	.nascent_init		= eic770x_nascent_init,
+	.final_init		= eic770x_final_init,
+	.resume_finish		= eic770x_resume_finish,
 };
