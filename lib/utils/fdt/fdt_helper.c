@@ -65,9 +65,11 @@ int fdt_find_match(void *fdt, int startoff,
 		nodeoff = fdt_node_offset_by_compatible(fdt, startoff,
 						match_table->compatible);
 		if (nodeoff >= 0) {
-			if (out_match)
-				*out_match = match_table;
-			return nodeoff;
+			if (fdt_node_is_enabled(fdt, nodeoff)) {
+				if (out_match)
+					*out_match = match_table;
+				return nodeoff;
+			}
 		}
 		match_table++;
 	}
