@@ -33,6 +33,16 @@ static void eic770x_fw_init(void *fdt, const struct fdt_match *match)
 #endif
 }
 
+static int eic770x_nascent_init(void)
+{
+	unsigned long hwpf;
+	hwpf = 0x104095C1BE241UL;
+	__asm__ volatile("csrw 0x7c3 , %0" : : "r"(hwpf));
+	hwpf = 0x38c84eUL;
+	__asm__ volatile("csrw 0x7c4 , %0" : : "r"(hwpf));
+	return 0;
+}
+
 static const struct fdt_match eic770x_match[] = {
 	{ .compatible = "SiFive,FU800-dev" },
 	{ .compatible = "fu800-dev" },
@@ -44,4 +54,5 @@ const struct platform_override eic770x = {
 	.match_table		= eic770x_match,
 	.tlbr_flush_limit	= eic770x_get_tlbr_flush_limit,
 	.fw_init		= eic770x_fw_init,
+	.nascent_init		= eic770x_nascent_init,
 };
