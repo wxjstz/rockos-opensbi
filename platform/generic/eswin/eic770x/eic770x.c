@@ -1,6 +1,9 @@
 #include <platform_override.h>
 #include <sbi_utils/fdt/fdt_helper.h>
+#include <sbi_utils/serial/uart8250.h>
+#include <sbi/riscv_locks.h>
 #include <sbi/riscv_io.h>
+#include <sbi/sbi_ecall_interface.h>
 
 #ifdef CONFIG_PLATFORM_ESWIN_EIC7700
 #define BR2_CHIPLET_1
@@ -9,6 +12,94 @@
 
 /* Full tlb flush always */
 #define EIC770X_TLB_RANGE_FLUSH_LIMIT	0
+
+#ifdef BR2_CHIPLET_1
+#ifdef BR2_CHIPLET_1_DIE0_AVAILABLE
+#define	DIE_REG_OFFSET				0
+#else
+#define	DIE_REG_OFFSET				0x20000000
+#endif
+#else //BR2_CHIPLET_2
+#define	DIE_REG_OFFSET				0
+#endif
+
+#define EIC770X_UART_RESET_ADDR			(0x51828434UL + DIE_REG_OFFSET)
+#define EIC770X_UART2_ADDR				(0x50920000UL + DIE_REG_OFFSET)
+#define EIC770X_UART_CLK       (200000000UL)
+#define EIC770X_UART_BAUDRATE			115200
+
+#define FRAME_DATA_MAX 250
+
+typedef struct {
+	uint32_t header;	// Frame heade
+	uint32_t xTaskToNotify; // id
+	uint8_t msg_type; 	// Message type
+	uint8_t cmd_type; 	// Command type
+	uint8_t cmd_result;  // command result
+	uint8_t data_len; 	// Data length
+	uint8_t data[FRAME_DATA_MAX]; // Data
+	uint8_t checksum; 	// Checksum
+	uint32_t tail;			// Frame tail
+} __attribute__((packed)) Message;
+
+typedef enum {
+	MSG_REQUEST = 0x01,
+	MSG_REPLY,
+	MSG_NOTIFLY,
+} MsgType;
+
+// Define command types
+typedef enum {
+	CMD_POWER_OFF = 0x01,
+	CMD_RESET = 0x02,
+	CMD_READ_BOARD_INFO = 0x03,
+	CMD_CONTROL_LED = 0x04,
+	// You can continue adding other command types
+} CommandType;
+
+struct uart8250_device mcu_uart_dev;
+static spinlock_t mcu_uart_lock = SPIN_LOCK_INITIALIZER;
+
+static int transmit_message(Message *msg)
+{
+	static int inited = 0;
+	unsigned char checksum = 0;
+	char *p = (char*)msg;
+	unsigned len = sizeof(*msg);
+
+	if (!inited) {
+		writeb(0x1B, (volatile void *)EIC770X_UART_RESET_ADDR);
+		writeb(0x1F, (volatile void *)EIC770X_UART_RESET_ADDR);
+		uart8250_init(&mcu_uart_dev,
+				EIC770X_UART2_ADDR,
+				EIC770X_UART_CLK,
+				EIC770X_UART_BAUDRATE,
+				2, 2, 0);
+		inited = 1;
+	}
+
+	msg->header = 0xA55AAA55;
+	msg->tail = 0xBDBABDBA;
+	checksum ^= msg->msg_type;
+	checksum ^= msg->cmd_type;
+	checksum ^= msg->data_len;
+	for (int i = 0; i < FRAME_DATA_MAX; ++i) {
+		if (i < msg->data_len)
+			checksum ^= msg->data[i];
+		else
+			msg->data[i] = 0;
+	}
+	msg->checksum = checksum;
+
+	spin_lock(&mcu_uart_lock);
+	while (len--) {
+		uart8250_putc(&mcu_uart_dev, *p);
+		p++;
+	}
+	spin_unlock(&mcu_uart_lock);
+
+	return 0;
+}
 
 static u64 eic770x_get_tlbr_flush_limit(const struct fdt_match *match)
 {
