@@ -4,6 +4,7 @@
 #include <sbi/riscv_locks.h>
 #include <sbi/riscv_io.h>
 #include <sbi/sbi_ecall_interface.h>
+#include <sbi/sbi_system.h>
 
 #ifdef CONFIG_PLATFORM_ESWIN_EIC7700
 #define BR2_CHIPLET_1
@@ -27,6 +28,10 @@
 #define EIC770X_UART2_ADDR				(0x50920000UL + DIE_REG_OFFSET)
 #define EIC770X_UART_CLK       (200000000UL)
 #define EIC770X_UART_BAUDRATE			115200
+
+/* system reset register */
+#define EIC770X_SYS_RESET_ADDR	0x51828300UL
+#define EIC770X_SYS_RESET_VALUE	0x1ac0ffe6
 
 #define FRAME_DATA_MAX 250
 
@@ -100,6 +105,56 @@ static int transmit_message(Message *msg)
 
 	return 0;
 }
+
+static int eic770x_core_shutdown(void)
+{
+	Message shutdown_reply = {
+		.msg_type = MSG_NOTIFLY,
+		.cmd_type = CMD_POWER_OFF,
+		.data_len = 0x0,
+	};
+	transmit_message(&shutdown_reply);
+	return 0;
+};
+
+static int eic770x_core_reset(void)
+{
+	writel(EIC770X_SYS_RESET_VALUE, (volatile void *)EIC770X_SYS_RESET_ADDR);
+	return 0;
+}
+
+static int eic770x_system_reset_check(u32 type, u32 reason)
+{
+	switch (type) {
+	case SBI_SRST_RESET_TYPE_SHUTDOWN:
+	case SBI_SRST_RESET_TYPE_COLD_REBOOT:
+	case SBI_SRST_RESET_TYPE_WARM_REBOOT:
+		return 1;
+	}
+
+	return 0;
+}
+
+static void eic770x_system_reset(u32 type, u32 reason)
+{
+	switch (type) {
+	case SBI_SRST_RESET_TYPE_SHUTDOWN:
+		eic770x_core_shutdown();
+		break;
+	case SBI_SRST_RESET_TYPE_COLD_REBOOT:
+	case SBI_SRST_RESET_TYPE_WARM_REBOOT:
+		eic770x_core_reset();
+		break;
+	}
+
+	sbi_hart_hang();
+}
+
+static struct sbi_system_reset_device eic770x_reset = {
+	.name = "eswin_eic770x_reset",
+	.system_reset_check = eic770x_system_reset_check,
+	.system_reset = eic770x_system_reset
+};
 
 static u64 eic770x_get_tlbr_flush_limit(const struct fdt_match *match)
 {
@@ -191,6 +246,14 @@ static void sbi_hart_blocker_fscr_configure(struct sbi_scratch *scratch)
 	init_fcsr();
 }
 
+static int eic770x_early_init(bool cold_boot, const struct fdt_match *match)
+{
+	if (cold_boot)
+		sbi_system_reset_add_device(&eic770x_reset);
+
+	return 0;
+}
+
 static int eic770x_final_init(int clod_boot, const struct fdt_match *match)
 {
 	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
@@ -217,6 +280,7 @@ const struct platform_override eic770x = {
 	.tlbr_flush_limit	= eic770x_get_tlbr_flush_limit,
 	.fw_init		= eic770x_fw_init,
 	.nascent_init		= eic770x_nascent_init,
+	.early_init		= eic770x_early_init,
 	.final_init		= eic770x_final_init,
 	.resume_finish		= eic770x_resume_finish,
 };
