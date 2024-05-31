@@ -127,7 +127,7 @@ static int openpiton_final_init(bool cold_boot)
  */
 static int openpiton_console_init(void)
 {
-	return uart8250_init(uart.addr,
+	return uart8250_console_init(uart.addr,
 			     uart.freq,
 			     uart.baud,
 			     OPENPITON_DEFAULT_UART_REG_SHIFT,

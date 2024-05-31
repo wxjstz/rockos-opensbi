@@ -92,7 +92,7 @@ static int ariane_final_init(bool cold_boot)
  */
 static int ariane_console_init(void)
 {
-	return uart8250_init(ARIANE_UART_ADDR,
+	return uart8250_console_init(ARIANE_UART_ADDR,
 			     ARIANE_UART_FREQ,
 			     ARIANE_UART_BAUDRATE,
 			     ARIANE_UART_REG_SHIFT,

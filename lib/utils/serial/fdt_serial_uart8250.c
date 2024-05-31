@@ -21,7 +21,7 @@ static int serial_uart8250_init(void *fdt, int nodeoff,
 	if (rc)
 		return rc;
 
-	return uart8250_init(uart.addr, uart.freq, uart.baud,
+	return uart8250_console_init(uart.addr, uart.freq, uart.baud,
 			     uart.reg_shift, uart.reg_io_width,
 			     uart.reg_offset);
 }
