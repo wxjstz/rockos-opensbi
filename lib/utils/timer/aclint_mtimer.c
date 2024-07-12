@@ -53,9 +53,22 @@ static void mtimer_time_wr32(bool timecmp, u64 value, volatile u64 *addr)
 
 static u64 mtimer_value(void)
 {
-	struct aclint_mtimer_data *mt = mtimer_hartid2data[current_hartid()];
-	u64 *time_val = (void *)mt->mtime_addr;
+	u32 target_hart = current_hartid();
+	struct aclint_mtimer_data *mt = mtimer_hartid2data[target_hart];
+	u64 *time_val;
 
+#if defined(BR2_CLUSTER_1_CORE) && defined(BR2_CHIPLET_1_DIE1_AVAILABLE) && defined(BR2_CHIPLET_1)
+	if(target_hart >= 1  )
+#else
+	if(target_hart >= 4  )
+#endif
+	{
+		time_val = (void *)mt->mtime_addr + 0x20000000;
+	}
+	else
+	{
+		time_val = (void *)mt->mtime_addr;
+	}
 	/* Read MTIMER Time Value */
 	return mt->time_rd(time_val);
 }
@@ -64,21 +77,62 @@ static void mtimer_event_stop(void)
 {
 	u32 target_hart = current_hartid();
 	struct aclint_mtimer_data *mt = mtimer_hartid2data[target_hart];
-	u64 *time_cmp = (void *)mt->mtimecmp_addr;
+	u64 *time_cmp ;
 
 	/* Clear MTIMER Time Compare */
-	mt->time_wr(true, -1ULL, &time_cmp[target_hart - mt->first_hartid]);
+#if defined(BR2_CLUSTER_1_CORE) && defined(BR2_CHIPLET_1_DIE1_AVAILABLE) && defined(BR2_CHIPLET_1)
+	if(target_hart >= 1  )
+	{
+		time_cmp = (void *)(mt->mtimecmp_addr + 0x20000000);
+		mt->time_wr(true, -1ULL,
+				&time_cmp[(target_hart -1) - mt->first_hartid]);
+	}
+#else
+	if(target_hart >= 4  )
+	{
+		time_cmp = (void *)(mt->mtimecmp_addr + 0x20000000);
+		mt->time_wr(true, -1ULL,
+				&time_cmp[(target_hart -4) - mt->first_hartid]);
+	}
+#endif
+	
+	else{
+		time_cmp = (void *)mt->mtimecmp_addr;
+		mt->time_wr(true, -1ULL,
+				&time_cmp[target_hart - mt->first_hartid]);
+
+	}
 }
 
 static void mtimer_event_start(u64 next_event)
 {
 	u32 target_hart = current_hartid();
 	struct aclint_mtimer_data *mt = mtimer_hartid2data[target_hart];
-	u64 *time_cmp = (void *)mt->mtimecmp_addr;
+	u64 *time_cmp;
 
 	/* Program MTIMER Time Compare */
-	mt->time_wr(true, next_event,
-		    &time_cmp[target_hart - mt->first_hartid]);
+#if defined(BR2_CLUSTER_1_CORE) && defined(BR2_CHIPLET_1_DIE1_AVAILABLE) && defined(BR2_CHIPLET_1)
+	if(target_hart >= 1  )
+	{
+		time_cmp = (void *)(mt->mtimecmp_addr + 0x20000000);
+		mt->time_wr(true, next_event,
+				&time_cmp[(target_hart - 1) - mt->first_hartid]);
+	} 
+#else
+	if(target_hart >= 4  )
+	{
+		time_cmp = (void *)(mt->mtimecmp_addr + 0x20000000);
+		mt->time_wr(true, next_event,
+				&time_cmp[(target_hart - 4) - mt->first_hartid]);
+	} 
+#endif
+	
+	else{
+		time_cmp = (void *)mt->mtimecmp_addr;
+		mt->time_wr(true, next_event,
+				&time_cmp[target_hart - mt->first_hartid]);
+	}
+
 }
 
 static struct sbi_timer_device mtimer = {
@@ -93,14 +147,27 @@ void aclint_mtimer_sync(struct aclint_mtimer_data *mt)
 	u64 v1, v2, mv, delta;
 	u64 *mt_time_val, *ref_time_val;
 	struct aclint_mtimer_data *reference;
+	u32 target_hart = current_hartid();
 
 	/* Sync-up non-shared MTIME if reference is available */
 	if (mt->has_shared_mtime || !mt->time_delta_reference)
 		return;
 
 	reference = mt->time_delta_reference;
-	mt_time_val = (void *)mt->mtime_addr;
-	ref_time_val = (void *)reference->mtime_addr;
+#if defined(BR2_CLUSTER_1_CORE) && defined(BR2_CHIPLET_1_DIE1_AVAILABLE) && defined(BR2_CHIPLET_1)
+	if(target_hart >= 1  )
+#else
+	if(target_hart >= 4  )
+#endif
+	{
+		mt_time_val = (void *)mt->mtime_addr + 0x20000000;
+		ref_time_val = (void *)reference->mtime_addr + 0x20000000;
+	}
+	else{
+		mt_time_val = (void *)mt->mtime_addr;
+		ref_time_val = (void *)reference->mtime_addr;
+	}
+
 	if (!atomic_raw_xchg_ulong(&mt->time_delta_computed, 1)) {
 		v1 = mt->time_rd(mt_time_val);
 		mv = reference->time_rd(ref_time_val);
@@ -135,7 +202,18 @@ int aclint_mtimer_warm_init(void)
 	aclint_mtimer_sync(mt);
 
 	/* Clear Time Compare */
-	mt_time_cmp = (void *)mt->mtimecmp_addr;
+#if defined(BR2_CLUSTER_1_CORE) && defined(BR2_CHIPLET_1_DIE1_AVAILABLE) && defined(BR2_CHIPLET_1)
+	if(target_hart >= 1  )
+#else
+	if(target_hart >= 4  )
+#endif
+	{
+		mt_time_cmp = (void *)mt->mtimecmp_addr + 0x20000000;
+	}
+	else
+	{
+		mt_time_cmp = (void *)mt->mtimecmp_addr;
+	}
 	mt->time_wr(true, -1ULL,
 		    &mt_time_cmp[target_hart - mt->first_hartid]);
 
@@ -144,6 +222,7 @@ int aclint_mtimer_warm_init(void)
 
 static int aclint_mtimer_add_regions(unsigned long addr, unsigned long size)
 {
+#ifndef HOLE_REGION
 #define MTIMER_ADD_REGION_ALIGN		0x1000
 	int rc;
 	unsigned long pos, end, rsize;
@@ -160,13 +239,13 @@ static int aclint_mtimer_add_regions(unsigned long addr, unsigned long size)
 				(end - pos) : MTIMER_ADD_REGION_ALIGN;
 
 		sbi_domain_memregion_init(pos, rsize,
-					  SBI_DOMAIN_MEMREGION_MMIO, &reg);
+					  SBI_DOMAIN_MEMREGION_MMIO, &reg,0);
 		rc = sbi_domain_root_add_memregion(&reg);
 		if (rc)
 			return rc;
 		pos += rsize;
 	}
-
+#endif
 	return 0;
 }
 

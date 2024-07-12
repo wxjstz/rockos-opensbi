@@ -27,6 +27,11 @@ static struct sbi_hartmask root_hmask = { 0 };
 #define ROOT_REGION_MAX	16
 static u32 root_memregs_count = 0;
 static struct sbi_domain_memregion root_fw_region;
+
+#ifdef HOLE_REGION
+static struct sbi_domain_memregion root_hole_region;
+#endif
+
 static struct sbi_domain_memregion root_memregs[ROOT_REGION_MAX + 1] = { 0 };
 
 struct sbi_domain root = {
@@ -72,10 +77,21 @@ static void domain_memregion_initfw(struct sbi_domain_memregion *reg)
 	sbi_memcpy(reg, &root_fw_region, sizeof(*reg));
 }
 
+#ifdef HOLE_REGION
+static void domain_memregion_inithole(struct sbi_domain_memregion *reg)
+{
+	if (!reg)
+		return;
+
+	sbi_memcpy(reg, &root_hole_region, sizeof(*reg));
+}
+#endif
+
 void sbi_domain_memregion_init(unsigned long addr,
 				unsigned long size,
 				unsigned long flags,
-				struct sbi_domain_memregion *reg)
+				struct sbi_domain_memregion *reg,
+				unsigned long tor)
 {
 	unsigned long base = 0, order;
 
@@ -83,9 +99,9 @@ void sbi_domain_memregion_init(unsigned long addr,
 		if (order < __riscv_xlen) {
 			base = addr & ~((1UL << order) - 1UL);
 			if ((base <= addr) &&
-			    (addr < (base + (1UL << order))) &&
-			    (base <= (addr + size - 1UL)) &&
-			    ((addr + size - 1UL) < (base + (1UL << order))))
+			(addr < (base + (1UL << order))) &&
+			(base <= (addr + size - 1UL)) &&
+			((addr + size - 1UL) < (base + (1UL << order))))
 				break;
 		} else {
 			base = 0;
@@ -98,6 +114,7 @@ void sbi_domain_memregion_init(unsigned long addr,
 		reg->base = base;
 		reg->order = order;
 		reg->flags = flags;
+		reg->tor = tor;
 	}
 }
 
@@ -325,8 +342,12 @@ void sbi_domain_dump(const struct sbi_domain *dom, const char *suffix)
 	i = 0;
 	sbi_domain_for_each_memregion(dom, reg) {
 		rstart = reg->base;
-		rend = (reg->order < __riscv_xlen) ?
-			rstart + ((1UL << reg->order) - 1) : -1UL;
+		if (!reg->tor) {
+			rend = (reg->order < __riscv_xlen) ?
+				rstart + ((1UL << reg->order) - 1) : -1UL;
+		}else{
+			rend = rstart + reg->tor - 1;
+		}
 
 		sbi_printf("Domain%d Region%02d    %s: 0x%" PRILX "-0x%" PRILX " ",
 			   dom->index, i, suffix, rstart, rend);
@@ -586,15 +607,86 @@ int sbi_domain_init(struct sbi_scratch *scratch, u32 cold_hartid)
 
 	/* Root domain firmware memory region */
 	sbi_domain_memregion_init(scratch->fw_start, scratch->fw_size, 0,
-				  &root_fw_region);
+				  &root_fw_region,0);
 	domain_memregion_initfw(&root_memregs[root_memregs_count++]);
 
+#ifdef HOLE_REGION
+
+/* msip + mtimecmp + mtime only for machine mode , if BR2_CHIPLET_2, config this when load npu driver */
+// TODO: npu driver load/unload trigger mspi and llc region re-config
+#if defined(BR2_CHIPLET_1_DIE0_AVAILABLE) && defined(BR2_CHIPLET_1)
+	sbi_domain_memregion_init(0x2000000UL, 0xbfffUL, SBI_DOMAIN_MEMREGION_MMIO,
+				  &root_hole_region,0);
+	domain_memregion_inithole(&root_memregs[root_memregs_count++]);
+#endif
+#if defined(BR2_CHIPLET_1_DIE1_AVAILABLE) && defined(BR2_CHIPLET_1)
+	sbi_domain_memregion_init(0x22000000UL, 0xbfffUL, SBI_DOMAIN_MEMREGION_MMIO,
+				  &root_hole_region,0);
+	domain_memregion_inithole(&root_memregs[root_memregs_count++]);
+#endif
+
+/* default reserve llc region, enable from driver load  */
+/*
+	|-----------------------|---------------
+	|	memory zone 	| Start address 
+	|-----------------------|---------------
+	|	system port 1	| 0x80_0000_0000
+	|-----------------------|---------------
+	|	LLC interleave	| 0x70_0000_0000
+	|-----------------------|---------------
+	|	reserved	| 0x60_0000_0000
+	|-----------------------|---------------
+	|	interleave	| 0x40_0000_0000
+	|-----------------------|---------------
+	|	LLC DIE1	| 0x38_0000_0000
+	|-----------------------|---------------
+	|	reserved	| 0x30_0000_0000
+	|-----------------------|---------------
+	|	FLAT DIE1	| 0x20_0000_0000
+	|-----------------------|---------------
+	|	LLC DIE0	| 0x18_0000_0000
+	|-----------------------|---------------
+	|	reserved	| 0x10_0000_0000
+	|-----------------------|---------------
+	|	FLAT DIE0	| 0x8000_0000
+	|-----------------------|---------------
+*/
+
+#if defined(BR2_CHIPLET_1_DIE0_AVAILABLE) && defined(BR2_CHIPLET_1)
+	/* If enable DDR ECC, should reserve highest 2GB space for ecc within 16GB all size, start from 0x400000000UL */
+	sbi_domain_memregion_init(0x1000000000UL, 0x3fffffUL, SBI_DOMAIN_MEMREGION_MMODE,
+				  &root_hole_region,0x7000000000UL);
+	domain_memregion_inithole(&root_memregs[root_memregs_count++]);
+#elif defined(BR2_CHIPLET_1_DIE1_AVAILABLE) && defined(BR2_CHIPLET_1)
+	sbi_domain_memregion_init(0x80000000UL, 0x3fffffUL, SBI_DOMAIN_MEMREGION_MMODE,
+				  &root_hole_region,0x1f80000000UL);
+	domain_memregion_inithole(&root_memregs[root_memregs_count++]);
+	sbi_domain_memregion_init(0x3000000000UL, 0x3fffffUL, SBI_DOMAIN_MEMREGION_MMODE,
+				  &root_hole_region,0x5000000000UL);
+	domain_memregion_inithole(&root_memregs[root_memregs_count++]);
+#elif defined(BR2_CHIPLET_2)
+	/* need 3 holes: die0 llc, die1 llc, interleave llc, change llc hole config to msip+mtimecompare+mtime when load npu driver */
+	// reserved + die0 llc
+	sbi_domain_memregion_init(0x1000000000UL, 0x3fffffUL, SBI_DOMAIN_MEMREGION_MMODE,
+				  &root_hole_region,0x1000000000UL);
+	domain_memregion_inithole(&root_memregs[root_memregs_count++]);
+	// reserved + die1 llc
+	sbi_domain_memregion_init(0x3000000000UL, 0x3fffffUL, SBI_DOMAIN_MEMREGION_MMODE,
+				  &root_hole_region,0x1000000000UL);
+	domain_memregion_inithole(&root_memregs[root_memregs_count++]);
+	// reserved + interleave llc
+	sbi_domain_memregion_init(0x6000000000UL, 0x3fffffUL, SBI_DOMAIN_MEMREGION_MMODE,
+				  &root_hole_region,0x2000000000UL);
+	domain_memregion_inithole(&root_memregs[root_memregs_count++]);
+#endif
+#endif
 	/* Root domain allow everything memory region */
 	sbi_domain_memregion_init(0, ~0UL,
 				  (SBI_DOMAIN_MEMREGION_READABLE |
 				   SBI_DOMAIN_MEMREGION_WRITEABLE |
 				   SBI_DOMAIN_MEMREGION_EXECUTABLE),
-				  &root_memregs[root_memregs_count++]);
+				  &root_memregs[root_memregs_count++],
+				  0);
 
 	/* Root domain memory region end */
 	root_memregs[root_memregs_count].order = 0;

@@ -23,33 +23,58 @@
 
 static void plic_set_priority(struct plic_data *plic, u32 source, u32 val)
 {
+#if ((defined BR2_CHIPLET_2) || ((defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE0_AVAILABLE)))
 	volatile void *plic_priority = (void *)plic->addr +
 			PLIC_PRIORITY_BASE + 4 * source;
 	writel(val, plic_priority);
+#endif
+#if ((defined BR2_CHIPLET_2) || ((defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE1_AVAILABLE)))
+	volatile void *plic_priority_1 = (void *)(plic->addr + 0x20000000) +
+			PLIC_PRIORITY_BASE + 4 * source;
+	writel(val, plic_priority_1);
+#endif
 }
 
 void plic_set_thresh(struct plic_data *plic, u32 cntxid, u32 val)
 {
-	volatile void *plic_thresh;
-
 	if (!plic)
 		return;
 
-	plic_thresh = (void *)plic->addr +
-		      PLIC_CONTEXT_BASE + PLIC_CONTEXT_STRIDE * cntxid;
-	writel(val, plic_thresh);
+#if ((defined BR2_CHIPLET_2) || ((defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE0_AVAILABLE)))
+	if (0 == (cntxid / 8)) { // die 0
+		volatile void *plic_thresh = (void *)plic->addr +
+			PLIC_CONTEXT_BASE + PLIC_CONTEXT_STRIDE * cntxid;
+		writel(val, plic_thresh);
+	}
+#endif
+#if ((defined BR2_CHIPLET_2) || ((defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE1_AVAILABLE)))
+	if (cntxid / 8) { // die 1
+		volatile void *plic_thresh_1 = (void *)(plic->addr + 0x20000000 ) +
+			PLIC_CONTEXT_BASE + PLIC_CONTEXT_STRIDE * (cntxid % 8);
+		writel(val, plic_thresh_1);
+	}
+#endif
 }
 
 void plic_set_ie(struct plic_data *plic, u32 cntxid, u32 word_index, u32 val)
 {
-	volatile void *plic_ie;
-
 	if (!plic)
 		return;
 
-	plic_ie = (void *)plic->addr +
-		   PLIC_ENABLE_BASE + PLIC_ENABLE_STRIDE * cntxid;
-	writel(val, plic_ie + word_index * 4);
+#if ((defined BR2_CHIPLET_2) || ((defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE0_AVAILABLE)))
+	if (0 == (cntxid / 8)) { // die 0
+		volatile void *plic_ie = (void *)plic->addr +
+			PLIC_ENABLE_BASE + PLIC_ENABLE_STRIDE * cntxid;
+		writel(val, plic_ie + word_index * 4);
+	}
+#endif
+#if ((defined BR2_CHIPLET_2) || ((defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE1_AVAILABLE)))
+	if (cntxid / 8) { // die 1
+		volatile void *plic_ie_1 = (void *)( plic->addr + 0x20000000 ) +
+			PLIC_ENABLE_BASE + PLIC_ENABLE_STRIDE * (cntxid % 8);
+		writel(val, plic_ie_1 + word_index * 4);
+	}
+#endif
 }
 
 int plic_warm_irqchip_init(struct plic_data *plic,

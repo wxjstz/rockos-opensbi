@@ -11,6 +11,25 @@
 #include <sbi/sbi_console.h>
 #include <sbi_utils/serial/uart8250.h>
 
+
+/*
+ * Divide positive or negative dividend by positive or negative divisor
+ * and round to closest integer. Result is undefined for negative
+ * divisors if the dividend variable type is unsigned and for negative
+ * dividends if the divisor variable type is unsigned.
+ */
+#define DIV_ROUND_CLOSEST(x, divisor)(			\
+{							\
+	typeof(x) __x = x;				\
+	typeof(divisor) __d = divisor;			\
+	(((typeof(x))-1) > 0 ||				\
+	 ((typeof(divisor))-1) > 0 ||			\
+	 (((__x) > 0) == ((__d) > 0))) ?		\
+		(((__x) + ((__d) / 2)) / (__d)) :	\
+		(((__x) - ((__d) / 2)) / (__d));	\
+}							\
+)
+
 /* clang-format off */
 
 #define UART_RBR_OFFSET		0	/* In:  Recieve Buffer Register */
@@ -26,6 +45,7 @@
 #define UART_MSR_OFFSET		6	/* In:  Modem Status Register */
 #define UART_SCR_OFFSET		7	/* I/O: Scratch Register */
 #define UART_MDR1_OFFSET	8	/* I/O:  Mode Register */
+#define UART_DLF_OFFSET		48	/* I/O: Divisor Latch Fraction Register */
 
 #define UART_LSR_FIFOE		0x80	/* Fifo error */
 #define UART_LSR_TEMT		0x40	/* Transmitter empty */
@@ -94,15 +114,19 @@ int uart8250_init(unsigned long base, u32 in_freq, u32 baudrate, u32 reg_shift,
 		  u32 reg_width)
 {
 	u16 bdiv;
-
+	u32 bdiv_f, base_baud;
+	
 	uart8250_base      = (volatile void *)base;
 	uart8250_reg_shift = reg_shift;
 	uart8250_reg_width = reg_width;
 	uart8250_in_freq   = in_freq;
 	uart8250_baudrate  = baudrate;
 
-	bdiv = uart8250_in_freq / (16 * uart8250_baudrate);
-
+	base_baud = uart8250_baudrate * 16;
+	bdiv = uart8250_in_freq / base_baud;
+	bdiv_f = uart8250_in_freq % base_baud;
+	
+	bdiv_f = DIV_ROUND_CLOSEST(bdiv_f << 0x4, base_baud);
 	/* Disable all interrupts */
 	set_reg(UART_IER_OFFSET, 0x00);
 	/* Enable DLAB */
@@ -113,6 +137,8 @@ int uart8250_init(unsigned long base, u32 in_freq, u32 baudrate, u32 reg_shift,
 		set_reg(UART_DLL_OFFSET, bdiv & 0xff);
 		/* Set divisor high byte */
 		set_reg(UART_DLM_OFFSET, (bdiv >> 8) & 0xff);
+
+		set_reg(UART_DLF_OFFSET, bdiv_f);
 	}
 
 	/* 8 bits, no parity, one stop bit */

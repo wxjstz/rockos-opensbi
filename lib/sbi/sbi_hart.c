@@ -21,6 +21,7 @@
 #include <sbi/sbi_platform.h>
 #include <sbi/sbi_string.h>
 #include <sbi/sbi_trap.h>
+#include <sbi/riscv_io.h>
 
 extern void __sbi_expected_trap(void);
 extern void __sbi_expected_trap_hext(void);
@@ -192,6 +193,70 @@ unsigned int sbi_hart_mhpm_bits(struct sbi_scratch *scratch)
 	return hfeatures->mhpm_bits;
 }
 
+int pmp_set_tor(unsigned int n, unsigned long prot, unsigned long addr_start, unsigned long addr_end)
+{
+	/* PMP addresses are 4-byte aligned, drop the bottom two bits */
+	unsigned long protected_start = ((size_t) addr_start)>>2;
+	unsigned long protected_end = ((size_t) addr_end)>>2;
+	unsigned long cfgmask = 0xffff, pmpcfg;
+	int pmpcfg_csr, pmpcfg_shift, pmpaddr_csr;
+	#define NAPOT_SIZE 4096
+	/* Clear the bit corresponding with alignment */
+	protected_start &= ~(NAPOT_SIZE >> 3);
+	protected_end &= ~(NAPOT_SIZE >> 3);
+	
+	/* start region */
+#if __riscv_xlen == 32
+	pmpcfg_csr   = CSR_PMPCFG0 + (n >> 2);
+	pmpcfg_shift = (n & 3) << 3;
+#elif __riscv_xlen == 64
+	pmpcfg_csr   = (CSR_PMPCFG0 + (n >> 2)) & ~1;
+	pmpcfg_shift = (n & 7) << 3;
+#else
+	return SBI_ENOTSUPP;
+#endif	
+	pmpaddr_csr = CSR_PMPADDR0 + n;
+
+	/* encode PMP config */
+	prot &= ~PMP_A;
+	cfgmask = ~(0xffUL << pmpcfg_shift);
+	pmpcfg	= (csr_read_num(pmpcfg_csr) & cfgmask);
+	pmpcfg |= ((prot << pmpcfg_shift) & ~cfgmask);
+
+	/* write csrs */
+	csr_write_num(pmpaddr_csr, protected_start);
+	csr_write_num(pmpcfg_csr, pmpcfg);
+
+	/* end region */
+	n++;	
+#if __riscv_xlen == 32
+	pmpcfg_csr   = CSR_PMPCFG0 + (n >> 2);
+	pmpcfg_shift = (n & 3) << 3;
+#elif __riscv_xlen == 64
+	pmpcfg_csr   = (CSR_PMPCFG0 + (n >> 2)) & ~1;
+	pmpcfg_shift = (n & 7) << 3;
+#else
+	return SBI_ENOTSUPP;
+#endif	
+	pmpaddr_csr = CSR_PMPADDR0 + n;
+
+	/* encode PMP config */
+	prot &= ~PMP_A;
+	prot |= PMP_A_TOR;
+	cfgmask = ~(0xffUL << pmpcfg_shift);
+	pmpcfg	= (csr_read_num(pmpcfg_csr) & cfgmask);
+	pmpcfg |= ((prot << pmpcfg_shift) & ~cfgmask);
+
+	/* write csrs */
+	csr_write_num(pmpaddr_csr, protected_end);
+	csr_write_num(pmpcfg_csr, pmpcfg);
+
+	// sbi_printf("\nsaddr:%lx eaddr:%lx  pmpcfg:%lx\n", addr_start,addr_end,pmpcfg);
+
+	return 0;
+}
+
+
 int sbi_hart_pmp_configure(struct sbi_scratch *scratch)
 {
 	struct sbi_domain_memregion *reg;
@@ -221,17 +286,81 @@ int sbi_hart_pmp_configure(struct sbi_scratch *scratch)
 		if (reg->flags & SBI_DOMAIN_MEMREGION_MMODE)
 			pmp_flags |= PMP_L;
 
-		pmp_addr =  reg->base >> PMP_SHIFT;
-		if (pmp_gran_log2 <= reg->order && pmp_addr < pmp_addr_max)
-			pmp_set(pmp_idx++, pmp_flags, reg->base, reg->order);
-		else {
-			sbi_printf("Can not configure pmp for domain %s", dom->name);
-			sbi_printf(" because memory region address %lx or size %lx is not in range\n",
-				    reg->base, reg->order);
+		if (!reg->tor) {
+			pmp_addr =  reg->base >> PMP_SHIFT;
+			if (pmp_gran_log2 <= reg->order && pmp_addr < pmp_addr_max)
+				pmp_set(pmp_idx++, pmp_flags, reg->base, reg->order);
+			else {
+				sbi_printf("Can not configure pmp for domain %s", dom->name);
+				sbi_printf(" because memory region address %lx or size %lx is not in range\n",
+					reg->base, reg->order);
+			}
+		} else {
+			pmp_addr =  reg->base;
+			pmp_set_tor(pmp_idx, pmp_flags, reg->base, reg->base+reg->tor);
+			pmp_idx+=2;
 		}
+		
 	}
 
 	return 0;
+}
+
+#ifndef BR2_CHIPLET_2
+static void init_bus_blocker(void)
+{
+#if (defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE0_AVAILABLE)
+	#define BLOCKER_TL64D2D_OUT	(void *)0x200000
+	#define BLOCKER_TL256D2D_OUT	(void *)0x202000
+	#define BLOCKER_TL256D2D_IN	(void *)0x204000
+#elif (defined BR2_CHIPLET_1) && (defined BR2_CHIPLET_1_DIE1_AVAILABLE)
+	#define BLOCKER_TL64D2D_OUT	(void *)(0x200000+0x20000000)
+	#define BLOCKER_TL256D2D_OUT	(void *)(0x202000+0x20000000)
+	#define BLOCKER_TL256D2D_IN	(void *)(0x204000+0x20000000)
+#endif
+	writel(1,BLOCKER_TL64D2D_OUT);
+	writel(1,BLOCKER_TL256D2D_OUT);
+	writel(1,BLOCKER_TL256D2D_IN);
+
+}
+#endif
+
+static void init_fcsr(void)
+{
+	unsigned long hwpf;	// Hardware Prefetcher 0 : 0x104095C1BE241 | Hardware Prefetcher 1 : 0x929F
+	
+	hwpf = 0x104095C1BE241UL;
+	__asm__ volatile("csrw 0x7c3 , %0" : : "r"(hwpf));
+	hwpf = 0x929FUL;
+        //cleanup fields
+        hwpf &= (~(0x1f << 5)); //[9:5]  cleanup  hitCacheThrdL2
+        hwpf &= (~(0x7  << 14)); //[16:14] cleanup numL2PFIssQEnt
+
+        //set new value
+        hwpf |= (0x1f << 5); //[9:5]    hitCacheThrdL2
+        hwpf |= (0x7  << 14); //[16:14] numL2PFIssQEnt
+	__asm__ volatile("csrw 0x7c4 , %0" : : "r"(hwpf));
+
+	/* enable speculative icache refill */
+	__asm__ volatile("csrw 0x7c1 , x0" : :);
+	__asm__ volatile("csrw 0x7c2 , x0" : :);
+
+}
+
+
+void sbi_hart_blocker_fscr_configure(struct sbi_scratch *scratch)
+{
+	struct sbi_domain *dom = sbi_domain_thishart_ptr();
+
+	if (dom->boot_hartid == current_hartid()) {
+		#ifndef BR2_CHIPLET_2
+		/* if only one die, need config blocker to 
+		generate fake response when access remote target */
+		init_bus_blocker();
+		#endif
+	}
+
+	init_fcsr();
 }
 
 /**
