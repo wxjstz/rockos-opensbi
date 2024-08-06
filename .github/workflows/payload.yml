@@ -77,15 +77,11 @@ jobs:
       - name: Compile payload
         run: |
               pushd opensbi
-                make PLATFORM=eswin/eic770x FW_PAYLOAD=y \
+                make PLATFORM=generic FW_PAYLOAD=y \
                   FW_FDT_PATH=${GITHUB_WORKSPACE}/output/u-boot.dtb \
                   FW_PAYLOAD_PATH=${GITHUB_WORKSPACE}/output/u-boot.bin \
-                  CHIPLET="BR2_CHIPLET_1" \
-                  CHIPLET_DIE_AVAILABLE="BR2_CHIPLET_1_DIE0_AVAILABLE" \
-                  MEM_MODE="BR2_MEMMODE_FLAT" \
-                  PLATFORM_CLUSTER_X_CORE="BR2_CLUSTER_4_CORE" \
                   -j $(nproc)
-                cp -v build/platform/eswin/eic770x/firmware/fw_payload.bin ${GITHUB_WORKSPACE}/output/fw_payload.bin
+                cp -v build/platform/generic/firmware/fw_payload.bin ${GITHUB_WORKSPACE}/output/fw_payload.bin
               popd
               tree ${GITHUB_WORKSPACE}/output
 
