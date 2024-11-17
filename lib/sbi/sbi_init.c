@@ -161,6 +161,40 @@ static void sbi_boot_print_domains(struct sbi_scratch *scratch)
 	sbi_domain_dump_all("      ");
 }
 
+static void sbi_boot_dump_pmp_configure(struct sbi_scratch *scratch, u32 hartid)
+{
+	int pmpcfg_csr, pmpcfg_shift, pmpaddr_csr;
+	unsigned long pmpcfg, pmpaddr;
+	unsigned int pmp_idx;
+	unsigned int pmp_count = sbi_hart_pmp_count(scratch);
+
+	sbi_printf("hart %u pmp configure register dump:\n", hartid);
+	for (pmp_idx = 0; pmp_idx < pmp_count; pmp_idx++) {
+#if __riscv_xlen == 32
+		pmpcfg_csr   = CSR_PMPCFG0 + (pmp_idx >> 2);
+		pmpcfg_shift = (pmp_idx & 3) << 3;
+#elif __riscv_xlen == 64
+		pmpcfg_csr   = (CSR_PMPCFG0 + (pmp_idx >> 2)) & ~1;
+		pmpcfg_shift = (pmp_idx & 7) << 3;
+#else
+# error "Unexpected __riscv_xlen"
+#endif
+		pmpaddr_csr = CSR_PMPADDR0 + pmp_idx;
+
+		pmpcfg = (csr_read_num(pmpcfg_csr) >> pmpcfg_shift) & 0xff;
+		pmpaddr = (csr_read_num(pmpaddr_csr));
+		sbi_printf("0x%"PRILX" %s %s%s%s%s\n", pmpaddr,
+			(pmpcfg & PMP_A) == 0 ? "OFF":
+			(pmpcfg & PMP_A) == PMP_A_NA4 ? "NA4":
+			(pmpcfg & PMP_A) == PMP_A_NAPOT ? "NAPOT":
+			(pmpcfg & PMP_A) == PMP_A_TOR ? "TOR": "???",
+			pmpcfg & PMP_R ? "R": "",
+			pmpcfg & PMP_W ? "W": "",
+			pmpcfg & PMP_X ? "X": "",
+			pmpcfg & PMP_L ? "L": "");
+	}
+}
+
 static void sbi_boot_print_hart(struct sbi_scratch *scratch, u32 hartid)
 {
 	int xlen;
@@ -380,6 +414,7 @@ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
 			   __func__, rc);
 		sbi_hart_hang();
 	}
+	sbi_boot_dump_pmp_configure(scratch,hartid);
 
 	count = sbi_scratch_offset_ptr(scratch, init_count_offset);
 	(*count)++;
